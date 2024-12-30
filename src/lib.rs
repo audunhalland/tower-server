@@ -4,7 +4,6 @@
 //!
 //! ```rust
 //! # use tower_server::*;
-//!
 //! async fn serve() {
 //!     let config = ServerConfig::new("0.0.0.0:8080".parse().unwrap())
 //!         // graceful shutdown setup:
