@@ -1,6 +1,11 @@
 //! High-level hyper server interfacing with tower-service.
 //!
-//! Example usage using Axum:
+//! ## Features:
+//! * `rustls` integration
+//! * Graceful shutdown using CancellationToken
+//! * Optional connnection middleware
+//!
+//! ## Example usage using Axum:
 //!
 //! ```rust
 //! # use tower_server::*;
