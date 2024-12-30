@@ -9,16 +9,16 @@
 //!
 //! ```rust
 //! # use tower_server::*;
-//! async fn serve() {
-//!     let config = ServerConfig::new("0.0.0.0:8080".parse().unwrap())
-//!         // graceful shutdown setup:
-//!         .with_cancellation_token(Default::default());
+//! # async fn serve() {
+//! let config = ServerConfig::new("0.0.0.0:8080".parse().unwrap())
+//!     // graceful shutdown setup:
+//!     .with_cancellation_token(Default::default());
 //!
-//!     Server::bind(config)
-//!         .await
-//!         .unwrap()
-//!         .serve(axum::Router::new()).await;
-//! }
+//! Server::bind(config)
+//!     .await
+//!     .unwrap()
+//!     .serve(axum::Router::new()).await;
+//! # }
 //! ```
 
 use std::net::SocketAddr;
