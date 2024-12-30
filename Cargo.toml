@@ -29,3 +29,6 @@ tokio-util = { version = "0.7", default-features = false }
 tower-service = "0.3"
 tracing = "0.1"
 url = { version = "2", features = ["serde"], optional = true }
+
+[dev-dependencies]
+axum = "0.7"
