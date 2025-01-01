@@ -17,7 +17,7 @@ pub trait TlsConnectionMiddleware: Clone + Send + 'static {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct NoopTlsConnectionMiddleware;
+pub struct NoopTlsConnectionMiddleware;
 
 impl TlsConnectionMiddleware for NoopTlsConnectionMiddleware {
     type Data = ();
