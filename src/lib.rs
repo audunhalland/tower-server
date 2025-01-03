@@ -4,20 +4,21 @@
 //! * `rustls` integration
 //! * Graceful shutdown using CancellationToken
 //! * Optional connnection middleware
+//! * Optional TLS connection middleware, for example for mTLS integration
 //!
 //! ## Example usage using Axum:
 //!
 //! ```rust
 //! # use tower_server::*;
 //! # async fn serve() {
-//! let config = ServerConfig::new("0.0.0.0:8080".parse().unwrap())
+//! let server = tower_server::Builder::new("0.0.0.0:8080".parse().unwrap())
 //!     // graceful shutdown setup:
-//!     .with_cancellation_token(Default::default());
-//!
-//! Server::bind(config)
+//!     .with_cancellation_token(Default::default())
+//!     .bind()
 //!     .await
-//!     .unwrap()
-//!     .serve(axum::Router::new()).await;
+//!     .unwrap();
+//!
+//! server.serve(axum::Router::new()).await;
 //! # }
 //! ```
 
@@ -28,7 +29,7 @@ use futures_util::future::poll_fn;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use pin_utils::pin_mut;
-use tls::{NoopTlsConnectionMiddleware, TlsConnectionMiddleware};
+use tls::{NoOpTlsConnectionMiddleware, TlsConnectionMiddleware};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
@@ -39,7 +40,7 @@ pub mod tls;
 
 /// Server configuration.
 #[derive(Clone)]
-pub struct ServerConfig<TlsM> {
+pub struct Builder<TlsM> {
     addr: SocketAddr,
     scheme: Scheme,
     cancel: CancellationToken,
@@ -48,7 +49,7 @@ pub struct ServerConfig<TlsM> {
     tls_config_factory: TlsConfigFactory,
 }
 
-impl ServerConfig<NoopTlsConnectionMiddleware> {
+impl Builder<NoOpTlsConnectionMiddleware> {
     /// Configure using a socket addr using the Http scheme.
     pub fn new(addr: SocketAddr) -> Self {
         Self {
@@ -56,7 +57,7 @@ impl ServerConfig<NoopTlsConnectionMiddleware> {
             scheme: Scheme::Http,
             cancel: Default::default(),
             connection_middleware: |_, _| {},
-            tls_connection_middleware: NoopTlsConnectionMiddleware,
+            tls_connection_middleware: NoOpTlsConnectionMiddleware,
             tls_config_factory: Arc::new(|| panic!("no TLS server config factory registered")),
         }
     }
@@ -81,7 +82,7 @@ impl ServerConfig<NoopTlsConnectionMiddleware> {
             addr,
             cancel: Default::default(),
             connection_middleware: |_, _| {},
-            tls_connection_middleware: NoopTlsConnectionMiddleware,
+            tls_connection_middleware: NoOpTlsConnectionMiddleware,
             scheme: match base_url.scheme() {
                 "http" => Scheme::Http,
                 "https" => Scheme::Https,
@@ -92,8 +93,8 @@ impl ServerConfig<NoopTlsConnectionMiddleware> {
     }
 }
 
-impl<TlsM> ServerConfig<TlsM> {
-    /// Set the scheme used by the the server. A Https scheme requires a TLS config factor.
+impl<TlsM> Builder<TlsM> {
+    /// Set the scheme used by the the server. A Https scheme requires a TLS config factory.
     pub fn with_scheme(mut self, scheme: Scheme) -> Self {
         self.scheme = scheme;
         self
@@ -115,8 +116,8 @@ impl<TlsM> ServerConfig<TlsM> {
     pub fn with_tls_connection_middleware<T: TlsConnectionMiddleware>(
         self,
         middleware: T,
-    ) -> ServerConfig<T> {
-        ServerConfig {
+    ) -> Builder<T> {
+        Builder {
             addr: self.addr,
             connection_middleware: self.connection_middleware,
             tls_connection_middleware: middleware,
@@ -130,6 +131,23 @@ impl<TlsM> ServerConfig<TlsM> {
     pub fn with_cancellation_token(mut self, cancel: CancellationToken) -> Self {
         self.cancel = cancel;
         self
+    }
+
+    /// Build server and bind it to the configured address.
+    pub async fn bind(self) -> anyhow::Result<TowerServer<TlsM>> {
+        let opt_tls_acceptor = match self.scheme {
+            Scheme::Http => None,
+            Scheme::Https => Some(TlsAcceptor::from((self.tls_config_factory)())),
+        };
+        let listener = TcpListener::bind(self.addr).await?;
+
+        Ok(TowerServer {
+            listener,
+            opt_tls_acceptor,
+            cancel: self.cancel,
+            connection_middleware: self.connection_middleware,
+            tls_connection_middleware: self.tls_connection_middleware,
+        })
     }
 }
 
@@ -145,7 +163,7 @@ pub type ConnectionMiddleware = fn(&mut http::Request<Incoming>, SocketAddr);
 pub type TlsConfigFactory = Arc<dyn Fn() -> Arc<rustls::server::ServerConfig> + Send + Sync>;
 
 /// A bound server, ready for running accept-loop using a tower service.
-pub struct Server<TlsM> {
+pub struct TowerServer<TlsM> {
     listener: TcpListener,
     opt_tls_acceptor: Option<TlsAcceptor>,
     cancel: CancellationToken,
@@ -171,24 +189,7 @@ macro_rules! await_connection {
     };
 }
 
-impl<TlsM> Server<TlsM> {
-    /// Bind server to address and port given by config
-    pub async fn bind(config: ServerConfig<TlsM>) -> anyhow::Result<Self> {
-        let opt_tls_acceptor = match config.scheme {
-            Scheme::Http => None,
-            Scheme::Https => Some(TlsAcceptor::from((config.tls_config_factory)())),
-        };
-        let listener = TcpListener::bind(config.addr).await?;
-
-        Ok(Self {
-            listener,
-            opt_tls_acceptor,
-            cancel: config.cancel,
-            connection_middleware: config.connection_middleware,
-            tls_connection_middleware: config.tls_connection_middleware,
-        })
-    }
-
+impl<TlsM> TowerServer<TlsM> {
     /// Access the locally bound address
     pub fn local_addr(&self) -> anyhow::Result<SocketAddr> {
         self.listener.local_addr().map_err(|e| e.into())
