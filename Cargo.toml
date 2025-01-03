@@ -8,9 +8,6 @@ repository = "https://github.com/audunhalland/tower-server"
 keywords = ["tower", "hyper", "http", "server", "rustls"]
 authors = ["Audun Halland <audun.halland@pm.me>"]
 
-[lib]
-doctest = false
-
 [features]
 url = ["dep:url"]
 
@@ -32,3 +29,4 @@ url = { version = "2", features = ["serde"], optional = true }
 
 [dev-dependencies]
 axum = "0.7"
+rustls-pki-types = "1"

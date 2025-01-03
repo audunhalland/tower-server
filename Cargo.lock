@@ -1163,6 +1163,7 @@ dependencies = [
  "hyper-util",
  "pin-utils",
  "rustls",
+ "rustls-pki-types",
  "tokio",
  "tokio-rustls",
  "tokio-util",

@@ -7,6 +7,7 @@ use rustls::ServerConnection;
 /// This middleware is implemented in two steps, first a data extraction step taking a [ServerConnection],
 /// then a HTTP request middleware runs with that data as a parameter.
 pub trait TlsConnectionMiddleware: Clone + Send + 'static {
+    /// The data extracted from the rustls ServerConnection.
     type Data: Send;
 
     /// Extract data from a [ServerConnection].

@@ -20,6 +20,69 @@
 //! server.serve(axum::Router::new()).await;
 //! # }
 //! ```
+//!
+//! ## Example using connection middleware
+//!
+//! ```rust
+//! #[derive(Clone)]
+//! struct RemoteAddr(std::net::SocketAddr);
+//!
+//! # async fn serve() {
+//! let server = tower_server::Builder::new("0.0.0.0:8080".parse().unwrap())
+//!     .with_connection_middleware(|req, remote_addr| {
+//!         req.extensions_mut().insert(RemoteAddr(remote_addr));
+//!     })
+//!     .bind()
+//!     .await
+//!     .unwrap();
+//!
+//! server.serve(axum::Router::new()).await;
+//! # }
+//! ```
+//!
+//! ## Example using TLS connection middleware
+//!
+//! ```rust
+//! use rustls_pki_types::CertificateDer;
+//! use hyper::body::Incoming;
+//!
+//! #[derive(Clone)]
+//! struct PeerCertMiddleware;
+//!
+//! /// A request extension that includes the mTLS peer certificate
+//! #[derive(Clone)]
+//! struct PeerCertificate(CertificateDer<'static>);
+//!
+//! impl tower_server::tls::TlsConnectionMiddleware for PeerCertMiddleware {
+//!     type Data = Option<PeerCertificate>;
+//!
+//!     /// Step 1: Extract data from the rustls server connection.
+//!     /// At this stage of TLS handshake the http::Request doesn't yet exist.
+//!     fn data(&self, connection: &rustls::ServerConnection) -> Self::Data {
+//!         Some(PeerCertificate(connection.peer_certificates()?.first()?.clone()))
+//!     }
+//!
+//!     /// Step 2: The http::Request now exists, and the request extension can be injected.
+//!     fn call(&self, req: &mut http::Request<Incoming>, data: &Option<PeerCertificate>) {
+//!         if let Some(peer_certificate) = data {
+//!             req.extensions_mut().insert(peer_certificate.clone());
+//!         }
+//!     }
+//! }
+//!
+//! #[derive(Clone)]
+//! struct RemoteAddr(std::net::SocketAddr);
+//!
+//! # async fn serve() {
+//! let server = tower_server::Builder::new("0.0.0.0:8080".parse().unwrap())
+//!     .with_tls_connection_middleware(PeerCertMiddleware)
+//!     .bind()
+//!     .await
+//!     .unwrap();
+//!
+//! server.serve(axum::Router::new()).await;
+//! # }
+//! ```
 
 use std::net::SocketAddr;
 use std::{error::Error as StdError, sync::Arc};
