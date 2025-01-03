@@ -9,7 +9,6 @@
 //! ## Example usage using Axum:
 //!
 //! ```rust
-//! # use tower_server::*;
 //! # async fn serve() {
 //! let server = tower_server::Builder::new("0.0.0.0:8080".parse().unwrap())
 //!     // graceful shutdown setup:
