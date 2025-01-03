@@ -225,7 +225,7 @@ pub type ConnectionMiddleware = fn(&mut http::Request<Incoming>, SocketAddr);
 pub type TlsConfigFactory = Arc<dyn Fn() -> Arc<rustls::server::ServerConfig> + Send + Sync>;
 
 /// A bound server, ready for running accept-loop using a tower service.
-pub struct TowerServer<TlsM> {
+pub struct TowerServer<TlsM = NoOpTlsConnectionMiddleware> {
     listener: TcpListener,
     opt_tls_acceptor: Option<TlsAcceptor>,
     cancel: CancellationToken,
