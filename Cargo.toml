@@ -1,6 +1,6 @@
 [package]
 name = "tower-server"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "High-level hyper server interfacing with tower"
@@ -28,5 +28,5 @@ tracing = "0.1"
 url = { version = "2", features = ["serde"], optional = true }
 
 [dev-dependencies]
-axum = "0.7"
+axum = "0.8"
 rustls-pki-types = "1"
