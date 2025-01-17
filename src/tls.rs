@@ -1,3 +1,5 @@
+//! TLS support.
+
 use http::Request;
 use hyper::body::Incoming;
 use rustls::ServerConnection;
@@ -17,6 +19,7 @@ pub trait TlsConnectionMiddleware: Clone + Send + 'static {
     fn call(&self, req: &mut Request<Incoming>, data: &Self::Data);
 }
 
+/// A TLS connection middleware that does nothing.
 #[derive(Clone, Copy)]
 pub struct NoOpTlsConnectionMiddleware;
 

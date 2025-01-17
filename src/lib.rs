@@ -84,6 +84,9 @@
 //! # }
 //! ```
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
 use std::net::SocketAddr;
 use std::{error::Error as StdError, sync::Arc};
 
@@ -99,6 +102,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, trace};
 
 pub mod tls;
+
+#[cfg(feature = "signal")]
+pub mod signal;
 
 /// Server configuration.
 #[derive(Clone)]
@@ -175,6 +181,7 @@ impl<TlsM> Builder<TlsM> {
         self
     }
 
+    /// Register a TLS connection middleware.
     pub fn with_tls_connection_middleware<T: TlsConnectionMiddleware>(
         self,
         middleware: T,
@@ -216,12 +223,18 @@ impl<TlsM> Builder<TlsM> {
 /// Desired HTTP scheme.
 #[derive(Clone, Copy)]
 pub enum Scheme {
+    /// HTTP without TLS.
     Http,
+    /// HTTP with TLS.
     Https,
 }
 
+/// The type of the connection middleware.
+///
+/// It is a function which receives a mutable request and a [SocketAddr] representing the remote client.
 pub type ConnectionMiddleware = fn(&mut http::Request<Incoming>, SocketAddr);
 
+/// The type of the TLS config factory.
 pub type TlsConfigFactory = Arc<dyn Fn() -> Arc<rustls::server::ServerConfig> + Send + Sync>;
 
 /// A bound server, ready for running accept-loop using a tower service.

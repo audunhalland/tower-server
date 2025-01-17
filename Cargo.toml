@@ -9,6 +9,7 @@ keywords = ["tower", "hyper", "http", "server", "rustls"]
 authors = ["Audun Halland <audun.halland@pm.me>"]
 
 [features]
+signal = ["tokio/signal"]
 url = ["dep:url"]
 
 [dependencies]
