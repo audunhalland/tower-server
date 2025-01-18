@@ -11,6 +11,7 @@ authors = ["Audun Halland <audun.halland@pm.me>"]
 [features]
 signal = ["tokio/signal"]
 url = ["dep:url"]
+unstable = []
 
 [dependencies]
 anyhow = "1"
@@ -31,3 +32,10 @@ url = { version = "2", features = ["serde"], optional = true }
 [dev-dependencies]
 axum = "0.8"
 rustls-pki-types = "1"
+
+[package.metadata.docs.rs]
+features = [
+    "signal",
+    "url",
+    "unstable",
+]

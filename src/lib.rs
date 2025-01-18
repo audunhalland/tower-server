@@ -86,6 +86,7 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+#![cfg_attr(feature = "unstable", feature(doc_auto_cfg))]
 
 use std::net::SocketAddr;
 use std::{error::Error as StdError, sync::Arc};
