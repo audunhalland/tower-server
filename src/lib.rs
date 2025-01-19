@@ -2,18 +2,25 @@
 //!
 //! ## Features:
 //! * `rustls` integration
-//! * Dynamic TLS reconfiguration without restarting, for e.g. rotating certificates
-//! * Graceful shutdown using CancellationToken
-//! * Optional connnection middleware
+//! * Graceful shutdown using `CancellationToken` from `tokio_util`.
+//! * Optional connnection middleware for handling the remote address
+//! * Dynamic TLS reconfiguration without restarting server, for e.g. certificate rotation
 //! * Optional TLS connection middleware, for example for mTLS integration
 //!
-//! ## Example usage using Axum:
+//! ## Example usage using Axum with graceful shutdown:
 //!
 //! ```rust
 //! # async fn serve() {
+//! #[cfg(feature = "signal")]
+//! // Uses the built-in termination signal:
+//! let shutdown_token = tower_server::signal::termination_signal();
+//!
+//! #[cfg(not(feature = "signal"))]
+//! // Configure the shutdown token manually:
+//! let shutdown_token = tokio_util::sync::CancellationToken::default();
+//!
 //! let server = tower_server::Builder::new("0.0.0.0:8080".parse().unwrap())
-//!     // graceful shutdown setup:
-//!     .with_cancellation_token(Default::default())
+//!     .with_graceful_shutdown(shutdown_token)
 //!     .bind()
 //!     .await
 //!     .unwrap();
@@ -216,7 +223,7 @@ impl<TlsM> Builder<TlsM> {
     }
 
     /// Register a cancellation token that enables graceful shutdown.
-    pub fn with_cancellation_token(mut self, cancel: CancellationToken) -> Self {
+    pub fn with_graceful_shutdown(mut self, cancel: CancellationToken) -> Self {
         self.cancel = cancel;
         self
     }
