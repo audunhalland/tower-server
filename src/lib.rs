@@ -79,11 +79,9 @@
 //!     }
 //! }
 //!
-//! #[derive(Clone)]
-//! struct RemoteAddr(std::net::SocketAddr);
-//!
 //! # async fn serve() {
-//! let server = tower_server::Builder::new("0.0.0.0:8080".parse().unwrap())
+//! let server = tower_server::Builder::new("0.0.0.0:443".parse().unwrap())
+//!     .with_scheme(tower_server::Scheme::Https)
 //!     .with_tls_connection_middleware(PeerCertMiddleware)
 //!     .with_tls_config(
 //!         rustls::server::ServerConfig::builder()
@@ -91,6 +89,52 @@
 //!             .with_no_client_auth()
 //!             // just a compiling example for setting a cert resolver, replace this with your actual config:
 //!             .with_cert_resolver(Arc::new(rustls::server::ResolvesServerCertUsingSni::new()))
+//!     )
+//!     .bind()
+//!     .await
+//!     .unwrap();
+//!
+//! server.serve(axum::Router::new()).await;
+//! # }
+//! ```
+//!
+//! ## Example using dynamically chaning TLS configuration
+//! [tls::TlsConfigurer] is implemented for [futures_util::stream::BoxStream] of [Arc]ed [rustls::server::ServerConfig]s:
+//!
+//! ```rust
+//! # use std::sync::Arc;
+//! # use std::time::Duration;
+//! use futures_util::StreamExt;
+//!
+//! # async fn serve() {
+//! let initial_tls_config = Arc::new(
+//!     rustls::server::ServerConfig::builder()
+//!         .with_no_client_auth()
+//!         .with_cert_resolver(Arc::new(rustls::server::ResolvesServerCertUsingSni::new()))
+//! );
+//!
+//! let tls_config_rotation = futures_util::stream::unfold((), |_| async move {
+//!     // renews after a fixed delay:
+//!     tokio::time::sleep(Duration::from_secs(10)).await;
+//!
+//!     // just for illustration purposes, replace with your own ServerConfig:
+//!     let renewed_config = Arc::new(
+//!         rustls::server::ServerConfig::builder()
+//!             .with_no_client_auth()
+//!             .with_cert_resolver(Arc::new(rustls::server::ResolvesServerCertUsingSni::new()))
+//!     );
+//!
+//!     Some((renewed_config, ()))
+//! });
+//!
+//! let server = tower_server::Builder::new("0.0.0.0:443".parse().unwrap())
+//!     .with_scheme(tower_server::Scheme::Https)
+//!     .with_tls_config(
+//!         // takes the initial config, which resolves without delay,
+//!         // chained together with the subsequent dynamic updates:
+//!         futures_util::stream::iter([initial_tls_config])
+//!             .chain(tls_config_rotation)
+//!             .boxed()
 //!     )
 //!     .bind()
 //!     .await
