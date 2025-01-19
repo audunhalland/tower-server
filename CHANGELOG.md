@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Introduce `TlsConfigurer` trait for TLS configuration. Replaces `TlsConfigFactory`.
 - Renamed `with_cancellation_token` to `with_graceful_shutdown`.
+- Turned off default-features of `rustls` and `tokio-rustls`.
 
 ### Added
 - Support for TLS configuration rotation based on streaming.
