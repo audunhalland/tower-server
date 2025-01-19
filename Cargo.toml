@@ -15,6 +15,7 @@ unstable = []
 
 [dependencies]
 anyhow = "1"
+arc-swap = "1.7"
 futures-util = "0.3"
 http = "1"
 http-body = "1"

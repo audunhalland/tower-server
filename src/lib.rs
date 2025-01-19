@@ -2,6 +2,7 @@
 //!
 //! ## Features:
 //! * `rustls` integration
+//! * Dynamic TLS reconfiguration without restarting, for e.g. rotating certificates
 //! * Graceful shutdown using CancellationToken
 //! * Optional connnection middleware
 //! * Optional TLS connection middleware, for example for mTLS integration
@@ -43,6 +44,7 @@
 //! ## Example using TLS connection middleware
 //!
 //! ```rust
+//! # use std::sync::Arc;
 //! use rustls_pki_types::CertificateDer;
 //! use hyper::body::Incoming;
 //!
@@ -76,6 +78,13 @@
 //! # async fn serve() {
 //! let server = tower_server::Builder::new("0.0.0.0:8080".parse().unwrap())
 //!     .with_tls_connection_middleware(PeerCertMiddleware)
+//!     .with_tls_config(
+//!         rustls::server::ServerConfig::builder()
+//!             // Instead of this, actually configure client authentication here:
+//!             .with_no_client_auth()
+//!             // just a compiling example for setting a cert resolver, replace this with your actual config:
+//!             .with_cert_resolver(Arc::new(rustls::server::ResolvesServerCertUsingSni::new()))
+//!     )
 //!     .bind()
 //!     .await
 //!     .unwrap();
@@ -91,11 +100,15 @@
 use std::net::SocketAddr;
 use std::{error::Error as StdError, sync::Arc};
 
+use arc_swap::ArcSwap;
 use futures_util::future::poll_fn;
+use futures_util::stream::BoxStream;
+use futures_util::StreamExt;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use pin_utils::pin_mut;
-use tls::{NoOpTlsConnectionMiddleware, TlsConnectionMiddleware};
+use rustls::ServerConfig;
+use tls::{NoOpTlsConnectionMiddleware, TlsConfigurer, TlsConnectionMiddleware};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
@@ -108,14 +121,14 @@ pub mod tls;
 pub mod signal;
 
 /// Server configuration.
-#[derive(Clone)]
 pub struct Builder<TlsM> {
     addr: SocketAddr,
     scheme: Scheme,
     cancel: CancellationToken,
     connection_middleware: fn(&mut http::Request<Incoming>, SocketAddr),
     tls_connection_middleware: TlsM,
-    tls_config_factory: TlsConfigFactory,
+    tls_config_is_dynamic: bool,
+    tls_config_stream: BoxStream<'static, Arc<rustls::server::ServerConfig>>,
 }
 
 impl Builder<NoOpTlsConnectionMiddleware> {
@@ -127,7 +140,8 @@ impl Builder<NoOpTlsConnectionMiddleware> {
             cancel: Default::default(),
             connection_middleware: |_, _| {},
             tls_connection_middleware: NoOpTlsConnectionMiddleware,
-            tls_config_factory: Arc::new(|| panic!("no TLS server config factory registered")),
+            tls_config_is_dynamic: false,
+            tls_config_stream: futures_util::stream::empty().boxed(),
         }
     }
 
@@ -157,7 +171,8 @@ impl Builder<NoOpTlsConnectionMiddleware> {
                 "https" => Scheme::Https,
                 scheme => return Err(anyhow!("unknown http server scheme: {scheme}")),
             },
-            tls_config_factory: Arc::new(|| panic!("no TLS server config factory registered")),
+            tls_config_is_dynamic: false,
+            tls_config_stream: futures_util::stream::empty().boxed(),
         })
     }
 }
@@ -176,9 +191,11 @@ impl<TlsM> Builder<TlsM> {
         self
     }
 
-    /// Register a TlsConfigFactory, which is a function that gets invoked when TLS is enabled.
-    pub fn with_tls_config(mut self, tls: impl Into<TlsConfigFactory>) -> Self {
-        self.tls_config_factory = tls.into();
+    /// Register a TLS configurator.
+    /// TLS configuration will only be invoked when Scheme is set to Https.
+    pub fn with_tls_config(mut self, tls: impl TlsConfigurer) -> Self {
+        self.tls_config_is_dynamic = tls.is_dynamic();
+        self.tls_config_stream = tls.into_stream();
         self
     }
 
@@ -193,7 +210,8 @@ impl<TlsM> Builder<TlsM> {
             tls_connection_middleware: middleware,
             scheme: self.scheme,
             cancel: self.cancel,
-            tls_config_factory: self.tls_config_factory,
+            tls_config_is_dynamic: self.tls_config_is_dynamic,
+            tls_config_stream: self.tls_config_stream,
         }
     }
 
@@ -205,15 +223,50 @@ impl<TlsM> Builder<TlsM> {
 
     /// Build server and bind it to the configured address.
     pub async fn bind(self) -> anyhow::Result<TowerServer<TlsM>> {
-        let opt_tls_acceptor = match self.scheme {
+        let mut tls_config_stream = self.tls_config_stream;
+
+        let tls_config_swap = match self.scheme {
             Scheme::Http => None,
-            Scheme::Https => Some(TlsAcceptor::from((self.tls_config_factory)())),
+            Scheme::Https => {
+                let initial_tls_config = tls_config_stream.next().await.unwrap_or_else(|| {
+                    panic!("Https scheme detected, but no TLS config registered")
+                });
+
+                let swap = Arc::new(ArcSwap::new(initial_tls_config));
+
+                // set up subscription for dynamically changing TLS config
+                if self.tls_config_is_dynamic {
+                    let cancel = self.cancel.clone();
+                    let swap = swap.clone();
+
+                    tokio::spawn(async move {
+                        loop {
+                            tokio::select! {
+                                next_tls_config = tls_config_stream.next() => {
+                                    if let Some(tls_config) = next_tls_config {
+                                        tracing::info!("renewing TLS ServerConfig");
+                                        swap.store(tls_config);
+                                    } else {
+                                        return;
+                                    }
+                                }
+                                _ = cancel.cancelled() => {
+                                    return;
+                                }
+                            }
+                        }
+                    });
+                }
+
+                Some(swap)
+            }
         };
+
         let listener = TcpListener::bind(self.addr).await?;
 
         Ok(TowerServer {
             listener,
-            opt_tls_acceptor,
+            tls_config_swap,
             cancel: self.cancel,
             connection_middleware: self.connection_middleware,
             tls_connection_middleware: self.tls_connection_middleware,
@@ -235,13 +288,10 @@ pub enum Scheme {
 /// It is a function which receives a mutable request and a [SocketAddr] representing the remote client.
 pub type ConnectionMiddleware = fn(&mut http::Request<Incoming>, SocketAddr);
 
-/// The type of the TLS config factory.
-pub type TlsConfigFactory = Arc<dyn Fn() -> Arc<rustls::server::ServerConfig> + Send + Sync>;
-
 /// A bound server, ready for running accept-loop using a tower service.
 pub struct TowerServer<TlsM = NoOpTlsConnectionMiddleware> {
     listener: TcpListener,
-    opt_tls_acceptor: Option<TlsAcceptor>,
+    tls_config_swap: Option<Arc<ArcSwap<ServerConfig>>>,
     cancel: CancellationToken,
     connection_middleware: fn(&mut http::Request<Incoming>, SocketAddr),
     tls_connection_middleware: TlsM,
@@ -314,7 +364,7 @@ impl<TlsM> TowerServer<TlsM> {
                 }
             };
 
-            let opt_tls_acceptor = self.opt_tls_acceptor.clone();
+            let tls_config_swap = self.tls_config_swap.clone();
             let close_rx = close_rx.clone();
             let cancel = self.cancel.clone();
             let connection_middleware = self.connection_middleware;
@@ -324,7 +374,7 @@ impl<TlsM> TowerServer<TlsM> {
             tokio::spawn(async move {
                 let connection_builder =
                     hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
-                match opt_tls_acceptor {
+                match tls_config_swap {
                     None => {
                         let connection = connection_builder.serve_connection_with_upgrades(
                             TokioIo::new(tcp_stream),
@@ -340,7 +390,8 @@ impl<TlsM> TowerServer<TlsM> {
                         );
                         await_connection!(connection, cancel);
                     }
-                    Some(tls_acceptor) => {
+                    Some(tls_config_swap) => {
+                        let tls_acceptor = TlsAcceptor::from(tls_config_swap.load_full());
                         let tls_stream = match tls_acceptor.accept(tcp_stream).await {
                             Ok(tls_stream) => tls_stream,
                             Err(err) => {
