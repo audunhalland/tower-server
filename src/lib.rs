@@ -98,7 +98,7 @@
 //! # }
 //! ```
 //!
-//! ## Example using dynamically chaning TLS configuration
+//! ## Example using dynamically changing TLS configuration
 //! [tls::TlsConfigurer] is implemented for [futures_util::stream::BoxStream] of [Arc]ed [rustls::server::ServerConfig]s:
 //!
 //! ```rust
@@ -107,35 +107,26 @@
 //! use futures_util::StreamExt;
 //!
 //! # async fn serve() {
-//! let initial_tls_config = Arc::new(
-//!     rustls::server::ServerConfig::builder()
-//!         .with_no_client_auth()
-//!         .with_cert_resolver(Arc::new(rustls::server::ResolvesServerCertUsingSni::new()))
-//! );
-//!
-//! let tls_config_rotation = futures_util::stream::unfold((), |_| async move {
-//!     // renews after a fixed delay:
-//!     tokio::time::sleep(Duration::from_secs(10)).await;
-//!
+//! let tls_config_stream = futures_util::stream::unfold(false, |delay| async move {
 //!     // just for illustration purposes, replace with your own ServerConfig:
-//!     let renewed_config = Arc::new(
+//!     let config = Arc::new(
 //!         rustls::server::ServerConfig::builder()
 //!             .with_no_client_auth()
 //!             .with_cert_resolver(Arc::new(rustls::server::ResolvesServerCertUsingSni::new()))
 //!     );
 //!
-//!     Some((renewed_config, ()))
+//!     if delay {
+//!         // simulate waiting for subsequent configurations
+//!         tokio::time::sleep(Duration::from_secs(10)).await;
+//!     }
+//!
+//!     Some((config, true))
 //! });
 //!
 //! let server = tower_server::Builder::new("0.0.0.0:443".parse().unwrap())
 //!     .with_scheme(tower_server::Scheme::Https)
-//!     .with_tls_config(
-//!         // takes the initial config, which resolves without delay,
-//!         // chained together with the subsequent dynamic updates:
-//!         futures_util::stream::iter([initial_tls_config])
-//!             .chain(tls_config_rotation)
-//!             .boxed()
-//!     )
+//!     // A boxed stream of Arc<rustls::ServerConfig> is a valid TlsConfigurer:
+//!     .with_tls_config(tls_config_stream.boxed())
 //!     .bind()
 //!     .await
 //!     .unwrap();
