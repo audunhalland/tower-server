@@ -348,24 +348,6 @@ pub struct TowerServer<TlsM = NoOpTlsConnectionMiddleware> {
     tls_connection_middleware: TlsM,
 }
 
-macro_rules! await_connection {
-    ($connection:ident, $cancel:ident) => {
-        pin_mut!($connection);
-
-        loop {
-            tokio::select! {
-                biased;
-                _ = $connection.as_mut() => {
-                    break;
-                }
-                _ = $cancel.cancelled() => {
-                    $connection.as_mut().graceful_shutdown();
-                }
-            }
-        }
-    };
-}
-
 impl<TlsM> TowerServer<TlsM> {
     /// Access the locally bound address
     pub fn local_addr(&self) -> anyhow::Result<SocketAddr> {
@@ -439,7 +421,15 @@ impl<TlsM> TowerServer<TlsM> {
                                 }
                             }),
                         );
-                        await_connection!(connection, cancel);
+                        pin_mut!(connection);
+                        tokio::select! {
+                            biased;
+                            _ = connection.as_mut() => {}
+                            _ = cancel.cancelled() => {
+                                connection.as_mut().graceful_shutdown();
+                                let _ = connection.as_mut().await;
+                            }
+                        }
                     }
                     Some(tls_config_swap) => {
                         let tls_acceptor = TlsAcceptor::from(tls_config_swap.load_full());
@@ -467,7 +457,16 @@ impl<TlsM> TowerServer<TlsM> {
                                 }
                             }),
                         );
-                        await_connection!(connection, cancel);
+
+                        pin_mut!(connection);
+                        tokio::select! {
+                            biased;
+                            _ = connection.as_mut() => {}
+                            _ = cancel.cancelled() => {
+                                connection.as_mut().graceful_shutdown();
+                                let _ = connection.as_mut().await;
+                            }
+                        }
                     }
                 }
 
